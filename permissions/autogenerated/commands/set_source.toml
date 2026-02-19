@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-set-source"
+description = "Enables the set_source command without any pre-configured scope."
+commands.allow = ["set_source"]
+
+[[permission]]
+identifier = "deny-set-source"
+description = "Denies the set_source command without any pre-configured scope."
+commands.deny = ["set_source"]

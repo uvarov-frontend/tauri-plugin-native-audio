@@ -1,0 +1,24 @@
+[package]
+name = "tauri-plugin-native-audio"
+version = "1.0.0"
+edition = "2021"
+rust-version = "1.77.2"
+build = "build.rs"
+links = "tauri-plugin-native-audio"
+description = "Native mobile audio playback plugin for Tauri"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/uvarov-frontend/tauri-plugin-native-audio"
+homepage = "https://github.com/uvarov-frontend/tauri-plugin-native-audio"
+documentation = "https://docs.rs/tauri-plugin-native-audio"
+keywords = ["tauri", "plugin", "audio", "media", "mobile"]
+categories = ["multimedia::audio"]
+
+[lib]
+name = "tauri_plugin_native_audio"
+path = "src/lib.rs"
+
+[dependencies]
+tauri = { version = "2", features = [] }
+
+[build-dependencies]
+tauri-plugin = { version = "2.0.2", features = ["build"] }

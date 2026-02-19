@@ -1,0 +1,38 @@
+{
+  "name": "tauri-plugin-native-audio-api",
+  "version": "1.0.0",
+  "description": "JavaScript API for tauri-plugin-native-audio",
+  "type": "module",
+  "license": "MIT OR Apache-2.0",
+  "files": [
+    "dist-js"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/uvarov-frontend/tauri-plugin-native-audio.git",
+    "directory": "guest-js"
+  },
+  "bugs": {
+    "url": "https://github.com/uvarov-frontend/tauri-plugin-native-audio/issues"
+  },
+  "homepage": "https://github.com/uvarov-frontend/tauri-plugin-native-audio",
+  "keywords": [
+    "tauri",
+    "tauri-plugin",
+    "audio",
+    "media3",
+    "avplayer"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist-js/index.d.ts",
+      "import": "./dist-js/index.mjs"
+    }
+  },
+  "peerDependencies": {
+    "@tauri-apps/api": ">=2.0.0"
+  }
+}
