@@ -250,8 +250,12 @@ object NativeAudioRuntime {
         startService(context)
         synchronized(lock) {
             ensure(context)
-            player?.playWhenReady = true
-            player?.play()
+            val exoPlayer = player ?: return
+            if (exoPlayer.playbackState == Player.STATE_ENDED) {
+                exoPlayer.seekTo(0L)
+            }
+            exoPlayer.playWhenReady = true
+            exoPlayer.play()
             lastError = null
             syncTickingLocked()
         }
