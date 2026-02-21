@@ -33,8 +33,9 @@ import kotlin.math.max
 private const val TAG = "plugin/native-audio"
 private const val EVENT_STATE = "native_audio_state"
 private const val NOTIFICATION_PERMISSION_REQUEST_CODE = 9512
-private const val PROGRESS_TICK_MS = 16L
+private const val PROGRESS_TICK_MS = 25L
 private const val SEEK_INCREMENT_MS = 10_000L
+private const val SEEK_STATE_STALE_MS = 1_500L
 
 data class NativeAudioState(
     val status: String,
@@ -64,6 +65,11 @@ class SetRateArgs {
     var rate: Double? = null
 }
 
+private data class PendingSeekState(
+    val shouldResume: Boolean,
+    val startedAtMs: Long,
+)
+
 object NativeAudioRuntime {
     private val lock = Any()
     private val tickHandler = Handler(Looper.getMainLooper())
@@ -73,6 +79,7 @@ object NativeAudioRuntime {
     private var mediaSession: MediaSession? = null
     private var mediaSessionPlayer: Player? = null
     private var lastError: String? = null
+    private var pendingSeekState: PendingSeekState? = null
 
     private val tickRunnable = object : Runnable {
         override fun run() {
@@ -110,8 +117,11 @@ object NativeAudioRuntime {
             if (reason == Player.DISCONTINUITY_REASON_SEEK || reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT) {
                 synchronized(lock) {
                     val exoPlayer = player ?: return@synchronized
+                    val pendingSeek = pendingSeekState
+                    val shouldResume = pendingSeek?.shouldResume ?: exoPlayer.playWhenReady
+                    if (!shouldResume && exoPlayer.playWhenReady) exoPlayer.pause()
                     val shouldRecoverPlayback =
-                        exoPlayer.playWhenReady &&
+                        shouldResume &&
                             !exoPlayer.isPlaying &&
                             exoPlayer.playbackState == Player.STATE_READY &&
                             lastError == null
@@ -126,6 +136,7 @@ object NativeAudioRuntime {
             Log.e(TAG, "onPlayerError code=${error.errorCodeName} message=${error.message}", error)
             synchronized(lock) {
                 lastError = error.message ?: "unknown"
+                pendingSeekState = null
             }
             syncTicking()
             emitState()
@@ -238,6 +249,7 @@ object NativeAudioRuntime {
 
             val mediaItem = buildMediaItem(src, title, artist, artworkUrl)
 
+            pendingSeekState = null
             exoPlayer.setMediaItem(mediaItem)
             exoPlayer.prepare()
             lastError = null
@@ -254,6 +266,7 @@ object NativeAudioRuntime {
             if (exoPlayer.playbackState == Player.STATE_ENDED) {
                 exoPlayer.seekTo(0L)
             }
+            pendingSeekState = null
             exoPlayer.playWhenReady = true
             exoPlayer.play()
             lastError = null
@@ -265,6 +278,7 @@ object NativeAudioRuntime {
     fun pause(context: Context) {
         synchronized(lock) {
             ensure(context)
+            pendingSeekState = null
             player?.pause()
             syncTickingLocked()
         }
@@ -276,7 +290,11 @@ object NativeAudioRuntime {
         synchronized(lock) {
             ensure(context)
             val safeMs = max(0L, (positionSec * 1000.0).toLong())
-            player?.seekTo(safeMs)
+            val exoPlayer = player ?: return@synchronized
+            val shouldResume = exoPlayer.playWhenReady || exoPlayer.isPlaying
+            pendingSeekState = PendingSeekState(shouldResume = shouldResume, startedAtMs = System.currentTimeMillis())
+            if (!shouldResume && exoPlayer.playWhenReady) exoPlayer.pause()
+            exoPlayer.seekTo(safeMs)
         }
         emitState()
     }
@@ -311,6 +329,7 @@ object NativeAudioRuntime {
             mediaSessionPlayer = null
 
             lastError = null
+            pendingSeekState = null
         }
         stopService(context)
         emitState()
@@ -384,11 +403,20 @@ object NativeAudioRuntime {
         val currentMs = max(0L, exoPlayer.currentPosition)
         val buffering = exoPlayer.playbackState == Player.STATE_BUFFERING
 
+        val seekState = activeSeekStateLocked()
+        if (seekState?.shouldResume == true && exoPlayer.isPlaying) pendingSeekState = null
+
+        val hasTerminalState = lastError != null || exoPlayer.playbackState == Player.STATE_ENDED
+        if (hasTerminalState) pendingSeekState = null
+        val effectiveIsPlaying = if (hasTerminalState) false else (seekState?.shouldResume ?: exoPlayer.isPlaying)
+        val effectiveBuffering = if (hasTerminalState || seekState?.shouldResume == false) false else buffering
+
         val status = when {
             lastError != null -> "error"
             exoPlayer.playbackState == Player.STATE_ENDED -> "ended"
-            buffering -> "loading"
-            exoPlayer.isPlaying -> "playing"
+            seekState?.shouldResume == true -> "playing"
+            effectiveBuffering -> "loading"
+            effectiveIsPlaying -> "playing"
             else -> "idle"
         }
 
@@ -396,11 +424,21 @@ object NativeAudioRuntime {
             status = status,
             currentTime = currentMs / 1000.0,
             duration = durationMs / 1000.0,
-            isPlaying = exoPlayer.isPlaying,
-            buffering = buffering,
+            isPlaying = effectiveIsPlaying,
+            buffering = effectiveBuffering,
             rate = exoPlayer.playbackParameters.speed.toDouble(),
             error = lastError,
         )
+    }
+
+    private fun activeSeekStateLocked(): PendingSeekState? {
+        val seekState = pendingSeekState ?: return null
+        val now = System.currentTimeMillis()
+        if (now - seekState.startedAtMs > SEEK_STATE_STALE_MS) {
+            pendingSeekState = null
+            return null
+        }
+        return seekState
     }
 }
 

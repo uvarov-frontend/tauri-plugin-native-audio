@@ -6,9 +6,10 @@ import UIKit
 
 private let eventState = "native_audio_state"
 private let remoteSeekStepSeconds = 10.0
-private let progressInterval = CMTime(seconds: 1.0 / 20.0, preferredTimescale: 600)
+private let progressInterval = CMTime(seconds: 1.0 / 40.0, preferredTimescale: 600)
 private let preparedSourcesDirectoryName = "tauri-plugin-native-audio"
 private let preparedSourceStaleThresholdSeconds: TimeInterval = 24 * 60 * 60
+private let seekStateStaleThresholdSeconds: TimeInterval = 1.5
 
 private struct NativeAudioState: Encodable {
   let status: String
@@ -70,6 +71,8 @@ private final class NativeAudioRuntime: NSObject {
   private var playbackRate = 1.0
   private var didReachEnd = false
   private var wasPlayingBeforeInterruption = false
+  private var pendingSeekShouldResume: Bool?
+  private var pendingSeekStartedAt: Date?
 
   private var nowPlayingTitle: String?
   private var nowPlayingArtist: String?
@@ -118,6 +121,8 @@ private final class NativeAudioRuntime: NSObject {
       preparedLocalSourceURL = playbackURL.isFileURL && playbackURL != normalizedURL ? playbackURL : nil
 
       let nextItem = AVPlayerItem(url: playbackURL)
+      pendingSeekShouldResume = nil
+      pendingSeekStartedAt = nil
       player?.pause()
       clearCurrentItemObservers()
       player?.replaceCurrentItem(with: nextItem)
@@ -147,6 +152,8 @@ private final class NativeAudioRuntime: NSObject {
         player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
       }
 
+      pendingSeekShouldResume = nil
+      pendingSeekStartedAt = nil
       player?.play()
       if playbackRate != 1.0 {
         player?.rate = Float(playbackRate)
@@ -160,6 +167,8 @@ private final class NativeAudioRuntime: NSObject {
 
   func pause() -> NativeAudioState {
     onMain {
+      pendingSeekShouldResume = nil
+      pendingSeekStartedAt = nil
       player?.pause()
       updateNowPlayingInfo()
       emitState()
@@ -174,8 +183,13 @@ private final class NativeAudioRuntime: NSObject {
       }
 
       let safePosition = max(0, position)
-      let shouldResume = isActuallyPlayingLocked()
+      let shouldResume = shouldResumeAfterSeekLocked()
       didReachEnd = false
+      pendingSeekShouldResume = shouldResume
+      pendingSeekStartedAt = Date()
+      if !shouldResume {
+        player.pause()
+      }
 
       let target = CMTime(seconds: safePosition, preferredTimescale: 600)
       player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
@@ -234,6 +248,8 @@ private final class NativeAudioRuntime: NSObject {
 
       lastError = nil
       didReachEnd = false
+      pendingSeekShouldResume = nil
+      pendingSeekStartedAt = nil
       playbackRate = 1.0
       nowPlayingTitle = nil
       nowPlayingArtist = nil
@@ -726,14 +742,38 @@ private final class NativeAudioRuntime: NSObject {
     let rawCurrentTime = currentTimeSeconds()
     let currentTime = duration > 0 ? max(0.0, min(duration, rawCurrentTime)) : rawCurrentTime
     let buffering = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
-    let isPlaying = isActuallyPlayingLocked()
+    let seekShouldResume: Bool?
+    if
+      let pendingSeekShouldResume,
+      let pendingSeekStartedAt,
+      Date().timeIntervalSince(pendingSeekStartedAt) <= seekStateStaleThresholdSeconds
+    {
+      seekShouldResume = pendingSeekShouldResume
+      if pendingSeekShouldResume && isActuallyPlayingLocked() {
+        self.pendingSeekShouldResume = nil
+        self.pendingSeekStartedAt = nil
+      }
+    } else {
+      self.pendingSeekShouldResume = nil
+      self.pendingSeekStartedAt = nil
+      seekShouldResume = nil
+    }
+    let hasTerminalState = lastError != nil || didReachEnd
+    if hasTerminalState {
+      self.pendingSeekShouldResume = nil
+      self.pendingSeekStartedAt = nil
+    }
+    let isPlaying = hasTerminalState ? false : (seekShouldResume ?? isActuallyPlayingLocked())
+    let effectiveBuffering = hasTerminalState || seekShouldResume == false ? false : buffering
 
     let status: String
     if lastError != nil {
       status = "error"
     } else if didReachEnd {
       status = "ended"
-    } else if buffering {
+    } else if seekShouldResume == true {
+      status = "playing"
+    } else if effectiveBuffering {
       status = "loading"
     } else if isPlaying {
       status = "playing"
@@ -746,10 +786,15 @@ private final class NativeAudioRuntime: NSObject {
       currentTime: currentTime,
       duration: duration,
       isPlaying: isPlaying,
-      buffering: buffering,
+      buffering: effectiveBuffering,
       rate: playbackRate,
       error: lastError
     )
+  }
+
+  private func shouldResumeAfterSeekLocked() -> Bool {
+    guard let player else { return false }
+    return isActuallyPlayingLocked() || player.timeControlStatus == .waitingToPlayAtSpecifiedRate
   }
 
   private func emitState() {
