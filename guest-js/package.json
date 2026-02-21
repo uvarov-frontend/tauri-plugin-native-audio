@@ -1,6 +1,6 @@
 {
   "name": "tauri-plugin-native-audio-api",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "JavaScript API for tauri-plugin-native-audio",
   "type": "module",
   "license": "MIT OR Apache-2.0",
