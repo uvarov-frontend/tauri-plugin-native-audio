@@ -13,6 +13,7 @@ Default permissions for the plugin
 - `allow-seek-to`
 - `allow-set-rate`
 - `allow-get-state`
+- `allow-get-progress-checkpoint`
 - `allow-dispose`
 
 ## Permission Table
@@ -46,6 +47,32 @@ Enables the dispose command without any pre-configured scope.
 <td>
 
 Denies the dispose command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`native-audio:allow-get-progress-checkpoint`
+
+</td>
+<td>
+
+Enables the get_progress_checkpoint command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`native-audio:deny-get-progress-checkpoint`
+
+</td>
+<td>
+
+Denies the get_progress_checkpoint command without any pre-configured scope.
 
 </td>
 </tr>

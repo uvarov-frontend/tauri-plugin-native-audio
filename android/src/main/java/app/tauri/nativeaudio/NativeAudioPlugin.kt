@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.app.PendingIntent
 import android.content.Context
+import android.content.SharedPreferences
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -36,6 +37,14 @@ private const val NOTIFICATION_PERMISSION_REQUEST_CODE = 9512
 private const val PROGRESS_TICK_MS = 25L
 private const val SEEK_INCREMENT_MS = 10_000L
 private const val SEEK_STATE_STALE_MS = 1_500L
+private const val PROGRESS_PERSIST_THROTTLE_MS = 1_000L
+private const val PROGRESS_NEAR_START_EPSILON_SEC = 0.25
+private const val PROGRESS_PERSIST_EPSILON_SEC = 0.05
+private const val PROGRESS_PREFS_NAME = "tauri_native_audio_progress"
+private const val PROGRESS_KEY_STORY_ID = "story_id"
+private const val PROGRESS_KEY_CURRENT_TIME = "current_time"
+private const val PROGRESS_KEY_UPDATED_AT_MS = "updated_at_ms"
+private const val PROGRESS_KEY_STATUS = "status"
 
 data class NativeAudioState(
     val status: String,
@@ -47,9 +56,17 @@ data class NativeAudioState(
     val error: String? = null,
 )
 
+data class NativeAudioProgressCheckpoint(
+    val id: Long,
+    val currentTime: Double,
+    val updatedAtMs: Long,
+    val status: String? = null,
+)
+
 @InvokeArg
 class SetSourceArgs {
     var src: String? = null
+    var id: Long? = null
     var title: String? = null
     var artist: String? = null
     var artworkUrl: String? = null
@@ -76,15 +93,21 @@ object NativeAudioRuntime {
     private var tickScheduled = false
 
     private var player: ExoPlayer? = null
+    private var appContext: Context? = null
     private var mediaSession: MediaSession? = null
     private var mediaSessionPlayer: Player? = null
     private var lastError: String? = null
     private var pendingSeekState: PendingSeekState? = null
+    private var currentStoryId: Long? = null
+    private var lastProgressPersistedAtMs = 0L
+    private var lastProgressPersistedStoryId: Long? = null
+    private var lastProgressPersistedTimeSec: Double? = null
 
     private val tickRunnable = object : Runnable {
         override fun run() {
             val shouldContinue = synchronized(lock) {
                 val snapshot = snapshotLocked()
+                appContext?.let { persistProgressCheckpointLocked(it, snapshot, force = false) }
                 NativeAudioPlugin.emitToActive(snapshot)
                 val isPlaying = player?.isPlaying == true
                 tickScheduled = isPlaying
@@ -96,6 +119,11 @@ object NativeAudioRuntime {
 
     private val playerListener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
+            if (playbackState == Player.STATE_ENDED) {
+                synchronized(lock) {
+                    appContext?.let { persistProgressCheckpointLocked(it, snapshotLocked(), force = true) }
+                }
+            }
             syncTicking()
             emitState()
         }
@@ -126,6 +154,7 @@ object NativeAudioRuntime {
                             exoPlayer.playbackState == Player.STATE_READY &&
                             lastError == null
                     if (shouldRecoverPlayback) exoPlayer.play()
+                    appContext?.let { persistProgressCheckpointLocked(it, snapshotLocked(), force = true) }
                 }
             }
             syncTicking()
@@ -148,6 +177,7 @@ object NativeAudioRuntime {
             if (player != null && mediaSession != null) return
 
             val ctx = context.applicationContext
+            appContext = ctx
 
             val audioAttributes = AudioAttributes.Builder()
                 .setUsage(C.USAGE_MEDIA)
@@ -242,7 +272,7 @@ object NativeAudioRuntime {
         context.applicationContext.stopService(serviceIntent)
     }
 
-    fun setSource(context: Context, src: String, title: String?, artist: String?, artworkUrl: String?) {
+    fun setSource(context: Context, src: String, storyId: Long?, title: String?, artist: String?, artworkUrl: String?) {
         synchronized(lock) {
             ensure(context)
             val exoPlayer = player ?: return
@@ -250,6 +280,7 @@ object NativeAudioRuntime {
             val mediaItem = buildMediaItem(src, title, artist, artworkUrl)
 
             pendingSeekState = null
+            currentStoryId = storyId?.takeIf { it > 0 }
             exoPlayer.setMediaItem(mediaItem)
             exoPlayer.prepare()
             lastError = null
@@ -281,6 +312,7 @@ object NativeAudioRuntime {
             pendingSeekState = null
             player?.pause()
             syncTickingLocked()
+            persistProgressCheckpointLocked(context.applicationContext, snapshotLocked(), force = true)
         }
         emitState()
     }
@@ -315,8 +347,25 @@ object NativeAudioRuntime {
         }
     }
 
+    fun getProgressCheckpoint(context: Context): NativeAudioProgressCheckpoint? {
+        val prefs = progressPrefs(context.applicationContext)
+        val storyId = prefs.getLong(PROGRESS_KEY_STORY_ID, 0L)
+        if (storyId <= 0L) return null
+        val currentTime = prefs.getFloat(PROGRESS_KEY_CURRENT_TIME, 0f).toDouble()
+        val updatedAtMs = prefs.getLong(PROGRESS_KEY_UPDATED_AT_MS, 0L)
+        if (!currentTime.isFinite() || currentTime <= 0.0 || updatedAtMs <= 0L) return null
+        val status = prefs.getString(PROGRESS_KEY_STATUS, null)
+        return NativeAudioProgressCheckpoint(
+            id = storyId,
+            currentTime = currentTime,
+            updatedAtMs = updatedAtMs,
+            status = status,
+        )
+    }
+
     fun dispose(context: Context) {
         synchronized(lock) {
+            persistProgressCheckpointLocked(context.applicationContext, snapshotLocked(), force = true)
             tickHandler.removeCallbacks(tickRunnable)
             tickScheduled = false
 
@@ -330,6 +379,8 @@ object NativeAudioRuntime {
 
             lastError = null
             pendingSeekState = null
+            currentStoryId = null
+            appContext = null
         }
         stopService(context)
         emitState()
@@ -370,6 +421,35 @@ object NativeAudioRuntime {
     private fun emitState() {
         val snapshot = synchronized(lock) { snapshotLocked() }
         NativeAudioPlugin.emitToActive(snapshot)
+    }
+
+    private fun progressPrefs(context: Context): SharedPreferences =
+        context.getSharedPreferences(PROGRESS_PREFS_NAME, Context.MODE_PRIVATE)
+
+    private fun persistProgressCheckpointLocked(context: Context, snapshot: NativeAudioState, force: Boolean) {
+        val storyId = currentStoryId ?: return
+        if (storyId <= 0L) return
+        if (!snapshot.currentTime.isFinite() || snapshot.currentTime <= PROGRESS_NEAR_START_EPSILON_SEC) return
+
+        val now = System.currentTimeMillis()
+        if (!force && now - lastProgressPersistedAtMs < PROGRESS_PERSIST_THROTTLE_MS) return
+
+        val prevStoryId = lastProgressPersistedStoryId
+        val prevTime = lastProgressPersistedTimeSec
+        if (!force && prevStoryId == storyId && prevTime != null && kotlin.math.abs(prevTime - snapshot.currentTime) <= PROGRESS_PERSIST_EPSILON_SEC) {
+            return
+        }
+
+        progressPrefs(context).edit()
+            .putLong(PROGRESS_KEY_STORY_ID, storyId)
+            .putFloat(PROGRESS_KEY_CURRENT_TIME, snapshot.currentTime.toFloat())
+            .putLong(PROGRESS_KEY_UPDATED_AT_MS, now)
+            .putString(PROGRESS_KEY_STATUS, snapshot.status)
+            .apply()
+
+        lastProgressPersistedAtMs = now
+        lastProgressPersistedStoryId = storyId
+        lastProgressPersistedTimeSec = snapshot.currentTime
     }
 
     private fun buildMediaItem(src: String, title: String?, artist: String?, artworkUrl: String?): MediaItem {
@@ -481,7 +561,7 @@ class NativeAudioPlugin(private val activity: Activity) : Plugin(activity) {
         }
 
         runCatching {
-            NativeAudioRuntime.setSource(activity.applicationContext, src, args.title, args.artist, args.artworkUrl)
+            NativeAudioRuntime.setSource(activity.applicationContext, src, args.id, args.title, args.artist, args.artworkUrl)
         }.onSuccess {
             invoke.resolve(toJsObject(NativeAudioRuntime.getState(activity.applicationContext)))
         }.onFailure {
@@ -559,6 +639,17 @@ class NativeAudioPlugin(private val activity: Activity) : Plugin(activity) {
     }
 
     @Command
+    fun getProgressCheckpoint(invoke: Invoke) {
+        runCatching {
+            NativeAudioRuntime.getProgressCheckpoint(activity.applicationContext)
+        }.onSuccess {
+            invoke.resolve(it?.let { checkpoint -> toJsObject(checkpoint) })
+        }.onFailure {
+            invoke.reject(it.message ?: "getProgressCheckpoint failed")
+        }
+    }
+
+    @Command
     fun dispose(invoke: Invoke) {
         runCatching {
             NativeAudioRuntime.dispose(activity.applicationContext)
@@ -600,6 +691,15 @@ class NativeAudioPlugin(private val activity: Activity) : Plugin(activity) {
         payload.put("buffering", state.buffering)
         payload.put("rate", state.rate)
         if (!state.error.isNullOrBlank()) payload.put("error", state.error)
+        return payload
+    }
+
+    private fun toJsObject(checkpoint: NativeAudioProgressCheckpoint): JSObject {
+        val payload = JSObject()
+        payload.put("id", checkpoint.id)
+        payload.put("currentTime", checkpoint.currentTime)
+        payload.put("updatedAtMs", checkpoint.updatedAtMs)
+        if (!checkpoint.status.isNullOrBlank()) payload.put("status", checkpoint.status)
         return payload
     }
 

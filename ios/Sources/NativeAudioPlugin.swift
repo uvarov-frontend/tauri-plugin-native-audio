@@ -10,6 +10,10 @@ private let progressInterval = CMTime(seconds: 1.0 / 40.0, preferredTimescale: 6
 private let preparedSourcesDirectoryName = "tauri-plugin-native-audio"
 private let preparedSourceStaleThresholdSeconds: TimeInterval = 24 * 60 * 60
 private let seekStateStaleThresholdSeconds: TimeInterval = 1.5
+private let progressPersistThrottleSeconds: TimeInterval = 1.0
+private let progressNearStartEpsilonSeconds = 0.25
+private let progressPersistEpsilonSeconds = 0.05
+private let progressCheckpointDefaultsKey = "tauri_native_audio_progress_checkpoint_v1"
 
 private struct NativeAudioState: Encodable {
   let status: String
@@ -21,8 +25,16 @@ private struct NativeAudioState: Encodable {
   let error: String?
 }
 
+private struct NativeAudioProgressCheckpoint: Codable {
+  let id: Int64
+  let currentTime: Double
+  let updatedAtMs: Int64
+  let status: String?
+}
+
 private struct SetSourceArgs: Decodable {
   let src: String
+  let id: Int64?
   let title: String?
   let artist: String?
   let artworkUrl: String?
@@ -73,6 +85,10 @@ private final class NativeAudioRuntime: NSObject {
   private var wasPlayingBeforeInterruption = false
   private var pendingSeekShouldResume: Bool?
   private var pendingSeekStartedAt: Date?
+  private var currentStoryId: Int64?
+  private var lastProgressPersistedAt = Date.distantPast
+  private var lastProgressPersistedStoryId: Int64?
+  private var lastProgressPersistedTime: Double?
 
   private var nowPlayingTitle: String?
   private var nowPlayingArtist: String?
@@ -91,6 +107,9 @@ private final class NativeAudioRuntime: NSObject {
 
   func detach(plugin: NativeAudioPlugin) {
     if self.plugin === plugin {
+      onMain {
+        self.persistProgressCheckpointIfNeeded(self.snapshotLocked(), force: true)
+      }
       self.plugin = nil
     }
   }
@@ -107,7 +126,7 @@ private final class NativeAudioRuntime: NSObject {
     }
   }
 
-  func setSource(src: String, title: String?, artist: String?, artworkURL: String?) throws -> NativeAudioState {
+  func setSource(src: String, id: Int64?, title: String?, artist: String?, artworkURL: String?) throws -> NativeAudioState {
     try onMain {
       ensurePlayer()
       try configureAudioSessionCategory()
@@ -123,6 +142,7 @@ private final class NativeAudioRuntime: NSObject {
       let nextItem = AVPlayerItem(url: playbackURL)
       pendingSeekShouldResume = nil
       pendingSeekStartedAt = nil
+      currentStoryId = (id ?? 0) > 0 ? id : nil
       player?.pause()
       clearCurrentItemObservers()
       player?.replaceCurrentItem(with: nextItem)
@@ -171,7 +191,7 @@ private final class NativeAudioRuntime: NSObject {
       pendingSeekStartedAt = nil
       player?.pause()
       updateNowPlayingInfo()
-      emitState()
+      emitState(forcePersistProgress: true)
       return snapshotLocked()
     }
   }
@@ -202,12 +222,12 @@ private final class NativeAudioRuntime: NSObject {
             }
           }
           self.updateNowPlayingInfo()
-          self.emitState()
+          self.emitState(forcePersistProgress: true)
         }
       }
 
       updateNowPlayingInfo()
-      emitState()
+      emitState(forcePersistProgress: true)
       return snapshotLocked()
     }
   }
@@ -234,8 +254,20 @@ private final class NativeAudioRuntime: NSObject {
     }
   }
 
+  func getProgressCheckpoint() -> NativeAudioProgressCheckpoint? {
+    onMain {
+      guard let data = UserDefaults.standard.data(forKey: progressCheckpointDefaultsKey) else { return nil }
+      do {
+        return try JSONDecoder().decode(NativeAudioProgressCheckpoint.self, from: data)
+      } catch {
+        return nil
+      }
+    }
+  }
+
   func dispose() {
     onMain {
+      persistProgressCheckpointIfNeeded(snapshotLocked(), force: true)
       unregisterRemoteCommands()
       clearNowPlayingInfo()
       removePlayerObservers()
@@ -250,6 +282,7 @@ private final class NativeAudioRuntime: NSObject {
       didReachEnd = false
       pendingSeekShouldResume = nil
       pendingSeekStartedAt = nil
+      currentStoryId = nil
       playbackRate = 1.0
       nowPlayingTitle = nil
       nowPlayingArtist = nil
@@ -320,7 +353,7 @@ private final class NativeAudioRuntime: NSObject {
     ) { [weak self] _ in
       self?.didReachEnd = true
       self?.updateNowPlayingInfo()
-      self?.emitState()
+      self?.emitState(forcePersistProgress: true)
     }
 
     failedToEndObserver = NotificationCenter.default.addObserver(
@@ -331,7 +364,7 @@ private final class NativeAudioRuntime: NSObject {
       let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? NSError
       self?.lastError = error?.localizedDescription ?? "failed to play audio"
       self?.updateNowPlayingInfo()
-      self?.emitState()
+      self?.emitState(forcePersistProgress: true)
     }
   }
 
@@ -797,9 +830,50 @@ private final class NativeAudioRuntime: NSObject {
     return isActuallyPlayingLocked() || player.timeControlStatus == .waitingToPlayAtSpecifiedRate
   }
 
-  private func emitState() {
-    guard let plugin else { return }
-    try? plugin.trigger(eventState, data: snapshotLocked())
+  private func emitState(forcePersistProgress: Bool = false) {
+    let snapshot = snapshotLocked()
+    persistProgressCheckpointIfNeeded(snapshot, force: forcePersistProgress)
+    guard let plugin else {
+      return
+    }
+    try? plugin.trigger(eventState, data: snapshot)
+  }
+
+  private func persistProgressCheckpointIfNeeded(_ snapshot: NativeAudioState, force: Bool) {
+    guard let storyId = currentStoryId, storyId > 0 else {
+      return
+    }
+    guard snapshot.currentTime.isFinite, snapshot.currentTime > progressNearStartEpsilonSeconds else {
+      return
+    }
+
+    let now = Date()
+    if !force, now.timeIntervalSince(lastProgressPersistedAt) < progressPersistThrottleSeconds {
+      return
+    }
+
+    if
+      !force,
+      lastProgressPersistedStoryId == storyId,
+      let lastTime = lastProgressPersistedTime,
+      abs(lastTime - snapshot.currentTime) <= progressPersistEpsilonSeconds
+    {
+      return
+    }
+
+    let checkpoint = NativeAudioProgressCheckpoint(
+      id: storyId,
+      currentTime: snapshot.currentTime,
+      updatedAtMs: Int64(now.timeIntervalSince1970 * 1000.0),
+      status: snapshot.status
+    )
+
+    if let data = try? JSONEncoder().encode(checkpoint) {
+      UserDefaults.standard.set(data, forKey: progressCheckpointDefaultsKey)
+      lastProgressPersistedAt = now
+      lastProgressPersistedStoryId = storyId
+      lastProgressPersistedTime = snapshot.currentTime
+    }
   }
 
   private func updateNowPlayingInfo(refreshArtwork: Bool = false) {
@@ -994,6 +1068,7 @@ class NativeAudioPlugin: Plugin {
       invoke.resolve(
         try self.runtime.setSource(
           src: src,
+          id: args.id,
           title: args.title,
           artist: args.artist,
           artworkURL: args.artworkUrl
@@ -1039,6 +1114,12 @@ class NativeAudioPlugin: Plugin {
   @objc public func getState(_ invoke: Invoke) {
     runOnMain(invoke) {
       invoke.resolve(self.runtime.getState())
+    }
+  }
+
+  @objc public func getProgressCheckpoint(_ invoke: Invoke) {
+    runOnMain(invoke) {
+      invoke.resolve(self.runtime.getProgressCheckpoint())
     }
   }
 

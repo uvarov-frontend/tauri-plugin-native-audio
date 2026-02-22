@@ -14,5 +14,6 @@ export const pause = async () => await call('pause');
 export const seekTo = async (position) => await call('seek_to', { position });
 export const setRate = async (rate) => await call('set_rate', { rate });
 export const getState = async () => await call('get_state');
+export const getProgressCheckpoint = async () => await call('get_progress_checkpoint');
 export const dispose = async () => await call('dispose');
 export const addStateListener = async (handler) => await addPluginListener(PLUGIN_NAME, STATE_EVENT, handler);
