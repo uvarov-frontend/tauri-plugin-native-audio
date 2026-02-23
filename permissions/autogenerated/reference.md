@@ -14,6 +14,7 @@ Default permissions for the plugin
 - `allow-set-rate`
 - `allow-get-state`
 - `allow-get-progress-checkpoint`
+- `allow-clear-progress-checkpoint`
 - `allow-dispose`
 
 ## Permission Table
@@ -24,6 +25,32 @@ Default permissions for the plugin
 <th>Description</th>
 </tr>
 
+
+<tr>
+<td>
+
+`native-audio:allow-clear-progress-checkpoint`
+
+</td>
+<td>
+
+Enables the clear_progress_checkpoint command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`native-audio:deny-clear-progress-checkpoint`
+
+</td>
+<td>
+
+Denies the clear_progress_checkpoint command without any pre-configured scope.
+
+</td>
+</tr>
 
 <tr>
 <td>

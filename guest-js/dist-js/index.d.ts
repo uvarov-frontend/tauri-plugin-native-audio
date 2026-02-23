@@ -33,5 +33,6 @@ export declare const seekTo: (position: number) => Promise<NativeAudioState>;
 export declare const setRate: (rate: number) => Promise<NativeAudioState>;
 export declare const getState: () => Promise<NativeAudioState>;
 export declare const getProgressCheckpoint: () => Promise<NativeAudioProgressCheckpoint | null>;
+export declare const clearProgressCheckpoint: () => Promise<void>;
 export declare const dispose: () => Promise<void>;
 export declare const addStateListener: (handler: (state: NativeAudioState) => void) => Promise<() => void>;

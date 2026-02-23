@@ -363,6 +363,20 @@ object NativeAudioRuntime {
         )
     }
 
+    fun clearProgressCheckpoint(context: Context) {
+        synchronized(lock) {
+            progressPrefs(context.applicationContext).edit()
+                .remove(PROGRESS_KEY_STORY_ID)
+                .remove(PROGRESS_KEY_CURRENT_TIME)
+                .remove(PROGRESS_KEY_UPDATED_AT_MS)
+                .remove(PROGRESS_KEY_STATUS)
+                .apply()
+            lastProgressPersistedAtMs = 0L
+            lastProgressPersistedStoryId = null
+            lastProgressPersistedTimeSec = null
+        }
+    }
+
     fun dispose(context: Context) {
         synchronized(lock) {
             persistProgressCheckpointLocked(context.applicationContext, snapshotLocked(), force = true)
@@ -646,6 +660,17 @@ class NativeAudioPlugin(private val activity: Activity) : Plugin(activity) {
             invoke.resolve(it?.let { checkpoint -> toJsObject(checkpoint) })
         }.onFailure {
             invoke.reject(it.message ?: "getProgressCheckpoint failed")
+        }
+    }
+
+    @Command
+    fun clearProgressCheckpoint(invoke: Invoke) {
+        runCatching {
+            NativeAudioRuntime.clearProgressCheckpoint(activity.applicationContext)
+        }.onSuccess {
+            invoke.resolve()
+        }.onFailure {
+            invoke.reject(it.message ?: "clearProgressCheckpoint failed")
         }
     }
 

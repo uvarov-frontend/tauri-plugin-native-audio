@@ -11,5 +11,6 @@ permissions = [
   "allow-set-rate",
   "allow-get-state",
   "allow-get-progress-checkpoint",
+  "allow-clear-progress-checkpoint",
   "allow-dispose",
 ]

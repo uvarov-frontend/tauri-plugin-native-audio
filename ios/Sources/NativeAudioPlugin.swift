@@ -265,6 +265,15 @@ private final class NativeAudioRuntime: NSObject {
     }
   }
 
+  func clearProgressCheckpoint() {
+    onMain {
+      UserDefaults.standard.removeObject(forKey: progressCheckpointDefaultsKey)
+      lastProgressPersistedAt = .distantPast
+      lastProgressPersistedStoryId = nil
+      lastProgressPersistedTime = nil
+    }
+  }
+
   func dispose() {
     onMain {
       persistProgressCheckpointIfNeeded(snapshotLocked(), force: true)
@@ -1120,6 +1129,13 @@ class NativeAudioPlugin: Plugin {
   @objc public func getProgressCheckpoint(_ invoke: Invoke) {
     runOnMain(invoke) {
       invoke.resolve(self.runtime.getProgressCheckpoint())
+    }
+  }
+
+  @objc public func clearProgressCheckpoint(_ invoke: Invoke) {
+    runOnMain(invoke) {
+      self.runtime.clearProgressCheckpoint()
+      invoke.resolve()
     }
   }
 

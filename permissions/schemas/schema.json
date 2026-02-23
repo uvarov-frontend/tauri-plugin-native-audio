@@ -295,6 +295,18 @@
       "type": "string",
       "oneOf": [
         {
+          "description": "Enables the clear_progress_checkpoint command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-clear-progress-checkpoint",
+          "markdownDescription": "Enables the clear_progress_checkpoint command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the clear_progress_checkpoint command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-clear-progress-checkpoint",
+          "markdownDescription": "Denies the clear_progress_checkpoint command without any pre-configured scope."
+        },
+        {
           "description": "Enables the dispose command without any pre-configured scope.",
           "type": "string",
           "const": "allow-dispose",
@@ -427,10 +439,10 @@
           "markdownDescription": "Denies the set_source command without any pre-configured scope."
         },
         {
-          "description": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-initialize`\n- `allow-register-listener`\n- `allow-remove-listener`\n- `allow-set-source`\n- `allow-play`\n- `allow-pause`\n- `allow-seek-to`\n- `allow-set-rate`\n- `allow-get-state`\n- `allow-get-progress-checkpoint`\n- `allow-dispose`",
+          "description": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-initialize`\n- `allow-register-listener`\n- `allow-remove-listener`\n- `allow-set-source`\n- `allow-play`\n- `allow-pause`\n- `allow-seek-to`\n- `allow-set-rate`\n- `allow-get-state`\n- `allow-get-progress-checkpoint`\n- `allow-clear-progress-checkpoint`\n- `allow-dispose`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-initialize`\n- `allow-register-listener`\n- `allow-remove-listener`\n- `allow-set-source`\n- `allow-play`\n- `allow-pause`\n- `allow-seek-to`\n- `allow-set-rate`\n- `allow-get-state`\n- `allow-get-progress-checkpoint`\n- `allow-dispose`"
+          "markdownDescription": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-initialize`\n- `allow-register-listener`\n- `allow-remove-listener`\n- `allow-set-source`\n- `allow-play`\n- `allow-pause`\n- `allow-seek-to`\n- `allow-set-rate`\n- `allow-get-state`\n- `allow-get-progress-checkpoint`\n- `allow-clear-progress-checkpoint`\n- `allow-dispose`"
         }
       ]
     }

@@ -9,6 +9,7 @@ const COMMANDS: &[&str] = &[
     "set_rate",
     "get_state",
     "get_progress_checkpoint",
+    "clear_progress_checkpoint",
     "dispose",
 ];
 

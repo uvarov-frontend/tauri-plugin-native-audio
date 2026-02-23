@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-clear-progress-checkpoint"
+description = "Enables the clear_progress_checkpoint command without any pre-configured scope."
+commands.allow = ["clear_progress_checkpoint"]
+
+[[permission]]
+identifier = "deny-clear-progress-checkpoint"
+description = "Denies the clear_progress_checkpoint command without any pre-configured scope."
+commands.deny = ["clear_progress_checkpoint"]
