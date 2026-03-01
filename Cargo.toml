@@ -18,7 +18,7 @@ name = "tauri_plugin_native_audio"
 path = "src/lib.rs"
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2.10.2", features = [] }
 
 [build-dependencies]
-tauri-plugin = { version = "2.0.2", features = ["build"] }
+tauri-plugin = { version = "2.5.3", features = ["build"] }
