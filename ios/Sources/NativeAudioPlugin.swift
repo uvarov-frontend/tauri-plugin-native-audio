@@ -462,7 +462,7 @@ private final class NativeAudioRuntime: NSObject {
     let aliasURL = cacheDir.appendingPathComponent(fileName, isDirectory: false)
 
     do {
-      try FileManager.default.createSymbolicLink(at: aliasURL, withDestinationURL: url)
+      try FileManager.default.linkItem(at: url, to: aliasURL)
     } catch {
       do {
         try FileManager.default.copyItem(at: url, to: aliasURL)
