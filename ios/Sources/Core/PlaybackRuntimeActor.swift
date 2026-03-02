@@ -1,6 +1,9 @@
 @preconcurrency import Foundation
+import UIKit
 
 private let seekCommitEpsilonSeconds = 0.02
+private let foregroundProgressEmitIntervalSeconds = 1.0 / 40.0
+private let backgroundProgressEmitIntervalSeconds = 0.25
 
 protocol NativeAudioEventEmitter: AnyObject, Sendable {
   func emitNativeAudioState(_ state: NativeAudioState)
@@ -21,8 +24,12 @@ actor PlaybackRuntimeActor {
   private var machine = PlaybackStateMachine()
   private var isConfigured = false
   private var wasPlayingBeforeInterruption = false
+  private var isAppInForeground = true
 
   private var lastEmittedState: NativeAudioState?
+  private var lastProgressTickEmitAt = Date.distantPast
+  private var appDidBecomeActiveObserver: NSObjectProtocol?
+  private var appDidEnterBackgroundObserver: NSObjectProtocol?
 
   private enum EmitTrigger {
     case transition
@@ -138,6 +145,7 @@ actor PlaybackRuntimeActor {
 
     remoteCommandController.unregister()
     audioSessionController.unregisterObservers()
+    unregisterAppLifecycleObservers()
 
     nowPlayingController.clear()
     playerAdapter.dispose()
@@ -147,6 +155,7 @@ actor PlaybackRuntimeActor {
     machine.resetAll()
     wasPlayingBeforeInterruption = false
     lastEmittedState = nil
+    lastProgressTickEmitAt = .distantPast
     isConfigured = false
 
     try? audioSessionController.setActive(false)
@@ -180,7 +189,60 @@ actor PlaybackRuntimeActor {
       }
     }
 
+    registerAppLifecycleObserversIfNeeded()
+    isAppInForeground = onMain {
+      UIApplication.shared.applicationState == .active
+    }
+
     isConfigured = true
+  }
+
+  private func registerAppLifecycleObserversIfNeeded() {
+    guard appDidBecomeActiveObserver == nil, appDidEnterBackgroundObserver == nil else {
+      return
+    }
+
+    let center = NotificationCenter.default
+    appDidBecomeActiveObserver = center.addObserver(
+      forName: UIApplication.didBecomeActiveNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      guard let self else { return }
+      Task {
+        await self.handleAppLifecycleChanged(isForeground: true)
+      }
+    }
+
+    appDidEnterBackgroundObserver = center.addObserver(
+      forName: UIApplication.didEnterBackgroundNotification,
+      object: nil,
+      queue: .main
+    ) { [weak self] _ in
+      guard let self else { return }
+      Task {
+        await self.handleAppLifecycleChanged(isForeground: false)
+      }
+    }
+  }
+
+  private func unregisterAppLifecycleObservers() {
+    let center = NotificationCenter.default
+
+    if let appDidBecomeActiveObserver {
+      center.removeObserver(appDidBecomeActiveObserver)
+      self.appDidBecomeActiveObserver = nil
+    }
+
+    if let appDidEnterBackgroundObserver {
+      center.removeObserver(appDidEnterBackgroundObserver)
+      self.appDidEnterBackgroundObserver = nil
+    }
+  }
+
+  private func handleAppLifecycleChanged(isForeground: Bool) {
+    isAppInForeground = isForeground
+    emitState(trigger: .transition, forcePersistCheckpoint: false, forceEmit: false, refreshArtwork: false)
   }
 
   private func handlePlayerEvent(_ event: PlayerEvent) {
@@ -339,10 +401,11 @@ actor PlaybackRuntimeActor {
     refreshArtwork: Bool
   ) {
     let state = snapshot()
+    let now = Date()
 
     checkpointStore.persistIfNeeded(snapshot: state, storyId: machine.currentStoryId, force: forcePersistCheckpoint)
 
-    let shouldEmit = forceEmit || shouldEmitState(state, trigger: trigger)
+    let shouldEmit = forceEmit || shouldEmitState(state, trigger: trigger, now: now)
     if shouldEmit {
       if let emitter {
         if Thread.isMainThread {
@@ -354,15 +417,30 @@ actor PlaybackRuntimeActor {
         }
       }
       lastEmittedState = state
+      if trigger == .progressTick {
+        lastProgressTickEmitAt = now
+      }
     }
 
-    nowPlayingController.update(state: state, metadata: machine.metadata, refreshArtwork: refreshArtwork)
+    let shouldUpdateNowPlaying = trigger != .progressTick || shouldEmit || forceEmit
+    if shouldUpdateNowPlaying {
+      nowPlayingController.update(state: state, metadata: machine.metadata, refreshArtwork: refreshArtwork)
+    }
   }
 
-  private func shouldEmitState(_ next: NativeAudioState, trigger: EmitTrigger) -> Bool {
+  private func shouldEmitState(_ next: NativeAudioState, trigger: EmitTrigger, now: Date) -> Bool {
     guard let lastEmittedState else {
       return true
     }
+
+    if trigger == .progressTick {
+      if !next.isPlaying {
+        return !isSameState(lhs: lastEmittedState, rhs: next)
+      }
+      let interval = isAppInForeground ? foregroundProgressEmitIntervalSeconds : backgroundProgressEmitIntervalSeconds
+      return now.timeIntervalSince(lastProgressTickEmitAt) >= interval
+    }
+
     return !isSameState(lhs: lastEmittedState, rhs: next)
   }
 

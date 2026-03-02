@@ -114,6 +114,8 @@ iOS:
 - Uses `AVAudioSession` category `.playback`.
 - For true background audio, enable Background Modes -> Audio in your iOS target.
 - Lock screen controls and now playing metadata are integrated through `MediaPlayer` framework APIs.
+- If your app target minimum is iOS 14.x, ensure `LD_RUNPATH_SEARCH_PATHS` includes `/usr/lib/swift` (along with `@executable_path/Frameworks`) to avoid launch-time Swift runtime loading issues.
+- For iOS 16+ targets, this extra runpath setting is typically not required.
 
 ## Configuration
 
@@ -298,6 +300,11 @@ iOS HTTP URL fails:
 
 - ATS can block plain HTTP
 - Prefer HTTPS or configure ATS exceptions in app settings
+
+iOS app closes right after launch on iOS 14:
+
+- Ensure app target `LD_RUNPATH_SEARCH_PATHS` includes both `@executable_path/Frameworks` and `/usr/lib/swift`
+- Clean/reinstall the app after changing build settings
 
 ## iOS Runtime
 

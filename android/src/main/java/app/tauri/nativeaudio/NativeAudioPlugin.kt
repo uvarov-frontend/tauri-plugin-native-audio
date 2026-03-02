@@ -8,9 +8,11 @@ import android.content.SharedPreferences
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.app.ActivityManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -34,7 +36,8 @@ import kotlin.math.max
 private const val TAG = "plugin/native-audio"
 private const val EVENT_STATE = "native_audio_state"
 private const val NOTIFICATION_PERMISSION_REQUEST_CODE = 9512
-private const val PROGRESS_TICK_MS = 25L
+private const val FOREGROUND_PROGRESS_TICK_MS = 25L
+private const val BACKGROUND_PROGRESS_TICK_MS = 250L
 private const val SEEK_INCREMENT_MS = 10_000L
 private const val SEEK_STATE_STALE_MS = 1_500L
 private const val PROGRESS_PERSIST_THROTTLE_MS = 1_000L
@@ -113,7 +116,10 @@ object NativeAudioRuntime {
                 tickScheduled = isPlaying
                 isPlaying
             }
-            if (shouldContinue) tickHandler.postDelayed(this, PROGRESS_TICK_MS)
+            if (shouldContinue) {
+                val delay = synchronized(lock) { nextProgressTickDelayLocked() }
+                tickHandler.postDelayed(this, delay)
+            }
         }
     }
 
@@ -430,6 +436,25 @@ object NativeAudioRuntime {
             tickScheduled = false
             tickHandler.removeCallbacks(tickRunnable)
         }
+    }
+
+    private fun nextProgressTickDelayLocked(): Long {
+        val context = appContext ?: return BACKGROUND_PROGRESS_TICK_MS
+        val isForeground = isAppInForeground()
+        val isInteractive = isDeviceInteractive(context)
+        return if (isForeground && isInteractive) FOREGROUND_PROGRESS_TICK_MS else BACKGROUND_PROGRESS_TICK_MS
+    }
+
+    private fun isAppInForeground(): Boolean {
+        val processInfo = ActivityManager.RunningAppProcessInfo()
+        ActivityManager.getMyMemoryState(processInfo)
+        return processInfo.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND ||
+            processInfo.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_VISIBLE
+    }
+
+    private fun isDeviceInteractive(context: Context): Boolean {
+        val powerManager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+        return powerManager?.isInteractive ?: true
     }
 
     private fun emitState() {
