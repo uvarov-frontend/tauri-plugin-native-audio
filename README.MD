@@ -33,7 +33,7 @@ Install the core plugin in `src-tauri/Cargo.toml`:
 [dependencies]
 tauri-plugin-native-audio = "1"
 # or from Git:
-tauri-plugin-native-audio = { git = "https://github.com/uvarov-frontend/tauri-plugin-native-audio", tag = "v1.0.4" }
+tauri-plugin-native-audio = { git = "https://github.com/uvarov-frontend/tauri-plugin-native-audio", tag = "v1.0.5" }
 ```
 
 Install the JavaScript guest bindings:
