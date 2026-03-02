@@ -1,11 +1,11 @@
-// swift-tools-version:5.3
+// swift-tools-version:5.9
 
 import PackageDescription
 
 let package = Package(
   name: "tauri-plugin-native-audio",
   platforms: [
-    .iOS(.v13)
+    .iOS(.v14)
   ],
   products: [
     .library(

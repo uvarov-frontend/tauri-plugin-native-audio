@@ -31,9 +31,9 @@ Install the core plugin in `src-tauri/Cargo.toml`:
 
 ```toml
 [dependencies]
-tauri-plugin-native-audio = "1.0.0"
+tauri-plugin-native-audio = "1"
 # or from Git:
-tauri-plugin-native-audio = { git = "https://github.com/uvarov-frontend/tauri-plugin-native-audio", tag = "v1.0.0" }
+tauri-plugin-native-audio = { git = "https://github.com/uvarov-frontend/tauri-plugin-native-audio", tag = "v1.0.4" }
 ```
 
 Install the JavaScript guest bindings:
@@ -98,6 +98,7 @@ If you need stricter ACL, use explicit allow/deny permissions from `permissions/
 
 Android:
 
+- Requires Android 8.0+ (API 26).
 - `play()` starts a foreground service (`NativeAudioService`) for media playback notification.
 - On Android 13+ notification permission is requested during `initialize()`.
 - Plugin manifest declares:
@@ -109,6 +110,7 @@ Android:
 
 iOS:
 
+- Requires iOS 14.0+.
 - Uses `AVAudioSession` category `.playback`.
 - For true background audio, enable Background Modes -> Audio in your iOS target.
 - Lock screen controls and now playing metadata are integrated through `MediaPlayer` framework APIs.
@@ -244,7 +246,7 @@ How it works:
 - During playback, the plugin stores a single checkpoint (v1) in native storage:
   - Android: `SharedPreferences`
   - iOS: `UserDefaults`
-- Checkpoint updates are throttled during playback and also written on pause/seek/end/dispose (best effort).
+- Checkpoint updates are deterministic: on pause, successful seek commit, end, dispose, and throttled play ticks.
 - Near-start micro progress (<= 0.25s) is ignored to avoid noisy checkpoints.
 
 Read the last checkpoint:
@@ -296,6 +298,15 @@ iOS HTTP URL fails:
 
 - ATS can block plain HTTP
 - Prefer HTTPS or configure ATS exceptions in app settings
+
+## iOS Runtime
+
+iOS playback runs through a single actor-owned runtime.
+
+- Playback commands (`setSource`, `play`, `pause`, `seekTo`, `setRate`) are serialized in one state owner.
+- `setSource` and `seekTo` use revision fencing (`sourceRevision`, `seekRevision`) to ignore stale async callbacks.
+- Seek is processed as a deterministic two-phase flow (`pending -> committed`).
+- Native state is emitted through `native_audio_state` with the `NativeAudioState` payload.
 
 ## AI Notice
 
