@@ -318,8 +318,6 @@ iOS playback runs through a single actor-owned runtime.
 ## AI Notice
 
 This plugin was fully developed with the help of AI.
-No junior developers were harmed, only a few CPU cores worked overtime 😂
-Yes, this duck was also invented by AI 🤣
 
 ## License
 
