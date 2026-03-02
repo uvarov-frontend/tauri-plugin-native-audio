@@ -122,7 +122,12 @@ actor SourceResolver {
       try? handle.close()
     }
 
-    let header = (try? handle.read(upToCount: 16)) ?? Data()
+    let header: Data
+    if #available(iOS 13.4, *) {
+      header = (try? handle.read(upToCount: 16)) ?? Data()
+    } else {
+      header = handle.readData(ofLength: 16)
+    }
     guard !header.isEmpty else {
       return nil
     }

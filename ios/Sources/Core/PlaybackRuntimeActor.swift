@@ -190,9 +190,7 @@ actor PlaybackRuntimeActor {
     }
 
     registerAppLifecycleObserversIfNeeded()
-    isAppInForeground = onMain {
-      UIApplication.shared.applicationState == .active
-    }
+    isAppInForeground = true
 
     isConfigured = true
   }
