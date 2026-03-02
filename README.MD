@@ -315,7 +315,7 @@ iOS playback runs through a single actor-owned runtime.
 - Seek is processed as a deterministic two-phase flow (`pending -> committed`).
 - Native state is emitted through `native_audio_state` with the `NativeAudioState` payload.
 
-## AI Notice
+## Notice
 
 This plugin was fully developed with the help of AI.
 
