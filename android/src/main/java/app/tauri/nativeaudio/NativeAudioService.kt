@@ -9,10 +9,12 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Build
+import android.util.Log
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import androidx.media3.ui.PlayerNotificationManager
 
+private const val TAG = "plugin/native-audio"
 private const val NOTIFICATION_ID = 9501
 private const val CHANNEL_ID_SUFFIX = ".native_audio"
 private const val NOTIFICATION_ICON_NAME = "ic_notification"
@@ -81,7 +83,12 @@ class NativeAudioService : MediaSessionService() {
                 object : PlayerNotificationManager.NotificationListener {
                     override fun onNotificationPosted(notificationId: Int, notification: Notification, ongoing: Boolean) {
                         if (ongoing) {
-                            startForeground(notificationId, notification)
+                            try {
+                                startForeground(notificationId, notification)
+                            } catch (error: IllegalStateException) {
+                                // ForegroundServiceStartNotAllowedException (API 31+) extends IllegalStateException.
+                                Log.w(TAG, "startForeground failed", error)
+                            }
                         } else {
                             stopForegroundCompat(remove = false)
                         }

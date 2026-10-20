@@ -263,11 +263,9 @@ object NativeAudioRuntime {
     fun startService(context: Context) {
         val serviceIntent = Intent(context.applicationContext, NativeAudioService::class.java)
         runCatching {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.applicationContext.startForegroundService(serviceIntent)
-            } else {
-                context.applicationContext.startService(serviceIntent)
-            }
+            // play() comes from the foreground app, so a plain start is allowed; the service enters
+            // the foreground itself once the notification is posted.
+            context.applicationContext.startService(serviceIntent)
         }.onFailure { error ->
             Log.w(TAG, "startService failed", error)
         }
@@ -296,11 +294,13 @@ object NativeAudioRuntime {
     }
 
     fun play(context: Context) {
-        startService(context)
         synchronized(lock) {
             ensure(context)
             val exoPlayer = player ?: return
-            if (exoPlayer.playbackState == Player.STATE_ENDED) {
+            if (exoPlayer.mediaItemCount == 0) return
+            if (exoPlayer.playbackState == Player.STATE_IDLE) {
+                exoPlayer.prepare()
+            } else if (exoPlayer.playbackState == Player.STATE_ENDED) {
                 exoPlayer.seekTo(0L)
             }
             pendingSeekState = null
@@ -309,6 +309,7 @@ object NativeAudioRuntime {
             lastError = null
             syncTickingLocked()
         }
+        startService(context)
         emitState()
     }
 
