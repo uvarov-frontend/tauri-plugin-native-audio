@@ -14,6 +14,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.PowerManager
 import android.util.Log
+import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.media3.common.AudioAttributes
@@ -711,9 +712,9 @@ class NativeAudioPlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
 
-    override fun onDestroy() {
+    override fun onDestroy(activity: AppCompatActivity) {
         if (activeInstance === this) activeInstance = null
-        super.onDestroy()
+        super.onDestroy(activity)
     }
 
     private fun requestNotificationPermission() {
